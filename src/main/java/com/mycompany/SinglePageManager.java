@@ -1,10 +1,11 @@
 package com.mycompany;
 
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 
 import org.apache.wicket.IPageFactory;
+import org.apache.wicket.MetaDataKey;
 import org.apache.wicket.Page;
+import org.apache.wicket.Session;
 import org.apache.wicket.core.request.handler.IPageClassRequestHandler;
 import org.apache.wicket.page.CouldNotLockPageException;
 import org.apache.wicket.page.IManageablePage;
@@ -24,9 +25,10 @@ public class SinglePageManager implements IPageManager, IPageFactory
 {
 	private final IPageManager manager;
 	private final IPageFactory factory;
-
-	private final ConcurrentMap<Class<? extends IManageablePage>, Integer> map = new ConcurrentHashMap<>();
-
+	
+	public static MetaDataKey<ConcurrentHashMap<Class<? extends IManageablePage>, Integer>> CLASS_PAGE_ID_MAP_KEY = 
+		new MetaDataKey<ConcurrentHashMap<Class<? extends IManageablePage>, Integer>> (){};
+	
 	public SinglePageManager(IPageManager manager, IPageFactory factory) {
 		this.manager = Args.notNull(manager, "manager");
 		this.factory = Args.notNull(factory, "factory");
@@ -47,7 +49,8 @@ public class SinglePageManager implements IPageManager, IPageFactory
 		{
 			IPageClassRequestHandler pageClassRequestHandler = (IPageClassRequestHandler) requestHandler;
 			Class<? extends IRequestablePage> pageClass = pageClassRequestHandler.getPageClass();
-			Integer pageId = map.get(pageClass);
+			Integer pageId = getPageId(pageClass);
+			
 			if (pageId != null)
 			{
 				return manager.getPage(pageId);
@@ -57,11 +60,26 @@ public class SinglePageManager implements IPageManager, IPageFactory
 		return manager.getPage(id);
 	}
 
+	private Integer getPageId(Class<? extends IRequestablePage> pageClass)
+	{
+		return getSessionPageMap().get(pageClass);
+	}
+
 	@Override
 	public void touchPage(IManageablePage page) throws CouldNotLockPageException
 	{
-		map.putIfAbsent(page.getClass(), page.getPageId());
+		putIfAbsent(page.getClass(), page.getPageId());
 		manager.touchPage(page);
+	}
+
+	private void putIfAbsent(Class<? extends IManageablePage> clazz, int pageId)
+	{
+		getSessionPageMap().putIfAbsent(clazz, pageId);
+	}
+
+	private ConcurrentHashMap<Class<? extends IManageablePage>, Integer> getSessionPageMap()
+	{
+		return Session.get().getMetaData(CLASS_PAGE_ID_MAP_KEY);
 	}
 
 	@Override
@@ -80,6 +98,9 @@ public class SinglePageManager implements IPageManager, IPageFactory
 	public void newSessionCreated()
 	{
 		manager.newSessionCreated();
+		
+		ConcurrentHashMap<Class<? extends IManageablePage>, Integer> pageMap = new ConcurrentHashMap<>();
+		Session.get().setMetaData(CLASS_PAGE_ID_MAP_KEY, pageMap);
 	}
 
 	@Override
@@ -104,7 +125,7 @@ public class SinglePageManager implements IPageManager, IPageFactory
 	public <C extends IRequestablePage> C newPage(Class<C> pageClass, PageParameters parameters)
 	{
 		Page page = null;
-		Integer pageId = map.get(pageClass);
+		Integer pageId = getPageId(pageClass);
 		if (pageId != null)
 		{
 			page = (Page) manager.getPage(pageId);
